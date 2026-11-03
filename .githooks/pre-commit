@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Bloquea el commit si hay secretos en los cambios en stage.
+export PATH="$HOME/.local/bin:$PATH"
+command -v gitleaks >/dev/null || { echo "gitleaks no instalado: ejecuta scripts/install-tools.sh"; exit 1; }
+exec gitleaks git --pre-commit --staged --redact --no-banner

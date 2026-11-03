@@ -1,0 +1,6 @@
+# Lo que Argo CD aplica en el clúster hub: el proyecto y una Application por componente.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - project.yaml
+  - applications

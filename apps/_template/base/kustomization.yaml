@@ -1,0 +1,16 @@
+# PLANTILLA de componente. Copia apps/_template a apps/<componente> y adaptalo.
+# - Si upstream publica manifiestos planos: usalos como recurso remoto con version fijada.
+# - Si solo publica Helm: usa el generador helmCharts (Argo CD tiene --enable-helm).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: example
+resources:
+  - namespace.yaml
+# helmCharts:
+#   - name: <chart>
+#     repo: https://charts.example.org      # o oci://registry/ruta
+#     version: 1.2.3                        # SIEMPRE fijada, nunca "latest"
+#     releaseName: <nombre>
+#     namespace: <ns>
+#     includeCRDs: true
+#     valuesFile: values.yaml

@@ -1,0 +1,16 @@
+# secretos y credenciales
+*.key
+*.pem
+*.kubeconfig
+kubeconfig*
+.env
+.env.*
+openbao-keys*
+*unseal*
+*.tfstate*
+# editor / SO
+.vscode/
+.idea/
+.DS_Store
+# salidas locales de validacion
+/out/

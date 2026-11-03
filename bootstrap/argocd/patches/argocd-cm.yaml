@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+data:
+  # Permite que Kustomize expanda charts de Helm (helmCharts:) al renderizar las apps.
+  kustomize.buildOptions: "--enable-helm"
+  timeout.reconciliation: "180s"

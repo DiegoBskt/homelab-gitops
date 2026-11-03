@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+data:
+  # El TLS termina en el Gateway (Envoy); Argo CD sirve HTTP por dentro del clúster.
+  server.insecure: "true"

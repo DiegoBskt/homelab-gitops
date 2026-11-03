@@ -1,0 +1,19 @@
+# Aplicacion raiz (app-of-apps) del clúster hub. Se aplica una vez tras instalar Argo CD.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/DiegoBskt/homelab-gitops.git
+    targetRevision: main
+    path: clusters/hub
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [ServerSideApply=true]

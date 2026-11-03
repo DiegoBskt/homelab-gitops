@@ -1,0 +1,4 @@
+# Una Application por componente (se anaden en la fase 3). Ver apps/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
