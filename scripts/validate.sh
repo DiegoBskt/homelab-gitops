@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Valida el repositorio: build de cada punto de entrada Kustomize, esquemas, lint, seguridad y secretos.
+# Valida el repositorio (o solo los destinos indicados): build Kustomize, esquemas, lint, seguridad y secretos.
+#   scripts/validate.sh                         valida todos los puntos de entrada
+#   scripts/validate.sh apps/x/overlays/hub ... valida solo esos destinos
 #   STRICT=1  hace bloqueantes kube-linter y trivy (por defecto solo informan).
 set -euo pipefail
-ROOT="$(git rev-parse --show-toplevel)"; cd "$ROOT"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
 # shellcheck disable=SC1091
 source tools/versions.env
 export PATH="$HOME/.local/bin:$PATH"
@@ -13,16 +15,20 @@ MODE=$([ "$STRICT" = 1 ] && echo bloqueante || echo informativo)
 rc=0
 step() { printf '\n== %s ==\n' "$1"; }
 
-# Puntos de entrada: bootstrap/<x>, apps/<app>/overlays/<cluster>, clusters/<cluster>
-mapfile -t TARGETS < <(
-  { find bootstrap -mindepth 2 -maxdepth 2 -name kustomization.yaml
-    find apps -path '*/overlays/*' -name kustomization.yaml -not -path 'apps/_template/*'
-    find clusters -mindepth 2 -maxdepth 2 -name kustomization.yaml
-  } 2>/dev/null | xargs -r -n1 dirname | sort -u)
+if [ "$#" -gt 0 ]; then
+  TARGETS=("$@")
+else
+  # Puntos de entrada: bootstrap/<x>, apps/<app>/overlays/<cluster>, clusters/<cluster>
+  mapfile -t TARGETS < <(
+    { find bootstrap -mindepth 2 -maxdepth 2 -name kustomization.yaml
+      find apps -path '*/overlays/*' -name kustomization.yaml -not -path 'apps/_template/*'
+      find clusters -mindepth 2 -maxdepth 2 -name kustomization.yaml
+    } 2>/dev/null | xargs -r -n1 dirname | sort -u)
+fi
 
 step "1/5 kustomize build (--enable-helm): ${#TARGETS[@]} destinos"
 for d in "${TARGETS[@]}"; do
-  slug="${d//\//__}"
+  d="${d%/}"; slug="${d//\//__}"
   if kustomize build --enable-helm "$d" > "$OUT/$slug.yaml" 2> "$OUT/$slug.err"; then
     printf 'OK    %-45s %s objetos\n' "$d" "$(grep -c '^kind:' "$OUT/$slug.yaml" || true)"
   else
@@ -47,12 +53,12 @@ if ls "$OUT"/*.yaml >/dev/null 2>&1; then
   echo "$tn hallazgos HIGH/CRITICAL"
   if [ "$STRICT" = 1 ] && [ "$tn" -gt 0 ]; then rc=1; fi
 else
-  echo "(sin manifiestos que validar todavia)"
+  echo "(sin manifiestos que validar)"
 fi
 
 step "5/5 gitleaks"
 gitleaks dir . --redact --no-banner || rc=1
-if [ "${CI:-}" = "true" ]; then gitleaks git . --redact --no-banner || rc=1; fi
+if [ "${CI:-}" = "true" ] && [ -d .git ]; then gitleaks git . --redact --no-banner || rc=1; fi
 
 echo; [ "$rc" = 0 ] && echo "VALIDACION OK" || echo "VALIDACION CON ERRORES"
 exit "$rc"

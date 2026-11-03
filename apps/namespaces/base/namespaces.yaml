@@ -1,0 +1,43 @@
+# Namespaces de la plataforma. Los crea solo esta app: el resto de apps NO definen Namespace (docs/contract.md).
+# Delete=false: quitar un Namespace del repo no borra sus cargas (hay que hacerlo a mano y a proposito).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels: {app.kubernetes.io/part-of: homelab}
+  annotations: {argocd.argoproj.io/sync-options: Delete=false}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openbao
+  labels: {app.kubernetes.io/part-of: homelab}
+  annotations: {argocd.argoproj.io/sync-options: Delete=false}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels: {app.kubernetes.io/part-of: homelab}
+  annotations: {argocd.argoproj.io/sync-options: Delete=false}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: storage
+  labels: {app.kubernetes.io/part-of: homelab}
+  annotations: {argocd.argoproj.io/sync-options: Delete=false}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels: {app.kubernetes.io/part-of: homelab}
+  annotations: {argocd.argoproj.io/sync-options: Delete=false}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: headlamp
+  labels: {app.kubernetes.io/part-of: homelab}
+  annotations: {argocd.argoproj.io/sync-options: Delete=false}
