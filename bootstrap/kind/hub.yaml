@@ -1,0 +1,27 @@
+# Cluster kind "hub": CNI propio (Cilium) y sin kube-proxy (lo reemplaza Cilium).
+# Subredes distintas por clúster para poder interconectarlos mas adelante (spoke-1: 10.20/10.21).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: hub
+networking:
+  disableDefaultCNI: true
+  kubeProxyMode: "none"
+  podSubnet: "10.10.0.0/16"
+  serviceSubnet: "10.11.0.0/16"
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - {containerPort: 80, hostPort: 80, protocol: TCP}
+      - {containerPort: 443, hostPort: 443, protocol: TCP}
+  - role: worker
+  - role: worker

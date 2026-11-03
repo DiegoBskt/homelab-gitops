@@ -1,0 +1,6 @@
+# Argo CD se gestiona a si mismo: misma base que el bootstrap + la ruta HTTP (que necesita los CRDs de Gateway API).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../bootstrap/argocd
+  - httproute.yaml

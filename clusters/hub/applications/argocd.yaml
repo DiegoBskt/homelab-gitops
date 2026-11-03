@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations: {argocd.argoproj.io/sync-wave: "1"}
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/DiegoBskt/homelab-gitops.git
+    targetRevision: main
+    path: apps/argocd/overlays/hub
+  destination: {server: https://kubernetes.default.svc, namespace: argocd}
+  ignoreDifferences:
+    # Argo CD rellena este Secret en tiempo de ejecucion (clave del servidor, hash de admin)
+    - {group: "", kind: Secret, name: argocd-secret, jsonPointers: [/data]}
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [ServerSideApply=true, SkipDryRunOnMissingResource=true, RespectIgnoreDifferences=true]
+    retry: {limit: 5, backoff: {duration: 10s, factor: 2, maxDuration: 3m}}

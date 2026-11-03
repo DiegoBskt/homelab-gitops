@@ -1,0 +1,61 @@
+# En kind no hay LoadBalancer: el proxy de Envoy se fija al control-plane (ingress-ready=true) y
+# publica el 80/443 del host con hostPort (Cilium con hostPort.enabled=true).
+# El listener del Gateway en el puerto N escucha en el contenedor en N+10000 (80 -> 10080, 443 -> 10443).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: kind-hostport
+  namespace: envoy-gateway-system
+  annotations: {argocd.argoproj.io/sync-wave: "1"}
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService: {type: ClusterIP}
+      envoyDeployment:
+        container:
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              template:
+                spec:
+                  nodeSelector: {ingress-ready: "true"}
+                  tolerations:
+                    - {key: node-role.kubernetes.io/control-plane, operator: Equal, effect: NoSchedule}
+                  containers:
+                    - name: envoy
+                      ports:
+                        - {containerPort: 10080, hostPort: 80, protocol: TCP}
+                        - {containerPort: 10443, hostPort: 443, protocol: TCP}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+  annotations: {argocd.argoproj.io/sync-wave: "1"}
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: kind-hostport
+    namespace: envoy-gateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: gateway-system
+  annotations: {argocd.argoproj.io/sync-wave: "2"}
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces: {from: All}

@@ -1,0 +1,18 @@
+# Valores de Cilium para kind. k8sServiceHost se pasa por --set segun el nombre del clúster.
+kubeProxyReplacement: true
+k8sServicePort: 6443
+ipam:
+  mode: kubernetes
+hostPort:
+  enabled: true          # imprescindible para el hostPort de Envoy Gateway en kind
+operator:
+  replicas: 1
+  prometheus:
+    enabled: true
+prometheus:
+  enabled: true          # metricas del agente en :9962
+hubble:
+  relay: {enabled: true}
+  ui: {enabled: true}
+  metrics:
+    enabled: [dns, drop, tcp, flow, icmp, http]   # :9965
