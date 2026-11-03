@@ -29,7 +29,14 @@ fi
 step "1/5 kustomize build (--enable-helm): ${#TARGETS[@]} destinos"
 for d in "${TARGETS[@]}"; do
   d="${d%/}"; slug="${d//\//__}"
-  if kustomize build --enable-helm "$d" > "$OUT/$slug.yaml" 2> "$OUT/$slug.err"; then
+  # las descargas de charts pueden fallar de forma transitoria (p. ej. HTTP 500 de GitHub): hasta 3 intentos
+  built=0
+  for attempt in 1 2 3; do
+    if kustomize build --enable-helm "$d" > "$OUT/$slug.yaml" 2> "$OUT/$slug.err"; then built=1; break; fi
+    grep -qE "(5[0-9]{2} |timeout|connection reset|EOF|TLS handshake)" "$OUT/$slug.err" || break   # error de contenido: no reintentar
+    echo "      (reintento $attempt/3 de $d por error de red)"; sleep $((attempt * 5))
+  done
+  if [ "$built" = 1 ]; then
     printf 'OK    %-45s %s objetos\n' "$d" "$(grep -c '^kind:' "$OUT/$slug.yaml" || true)"
   else
     printf 'FALLO %s\n' "$d"; sed 's/^/      /' "$OUT/$slug.err"; rc=1; rm -f "$OUT/$slug.yaml"

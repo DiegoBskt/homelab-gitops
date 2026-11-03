@@ -15,7 +15,13 @@ aviso(){ printf 'AVISO  %s\n' "$*"; warn=$((warn+1)); }
 APPS=(namespaces envoy-gateway cert-manager external-secrets openbao platform-secrets seaweedfs mimir loki tempo
       otel-collector kube-state-metrics node-exporter grafana headlamp hubble-route)
 for a in "${APPS[@]}"; do
-  if kustomize build --enable-helm "apps/$a/overlays/hub" > "$OUT/$a.yaml" 2> "$OUT/$a.err"; then :; else ko "build de apps/$a/overlays/hub"; sed 's/^/       /' "$OUT/$a.err" | head -5; fi
+  ready=0
+  for attempt in 1 2 3; do
+    if kustomize build --enable-helm "apps/$a/overlays/hub" > "$OUT/$a.yaml" 2> "$OUT/$a.err"; then ready=1; break; fi
+    grep -qE "(5[0-9]{2} |timeout|connection reset|EOF|TLS handshake)" "$OUT/$a.err" || break
+    sleep $((attempt * 5))
+  done
+  [ "$ready" = 1 ] || { ko "build de apps/$a/overlays/hub"; sed 's/^/       /' "$OUT/$a.err" | head -5; }
 done
 J() { yq -o=json -I=0 '.' "$OUT/$1.yaml"; }   # un JSON por documento
 
