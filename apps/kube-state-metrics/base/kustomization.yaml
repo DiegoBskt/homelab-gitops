@@ -1,0 +1,41 @@
+# kube-state-metrics: metricas de estado de los objetos de Kubernetes (job=kube-state-metrics).
+# Chart prometheus-community/kube-state-metrics (repo http, proyecto kubernetes/kube-state-metrics, activo).
+# El scraping lo hace el gateway OpenTelemetry (apps/otel-collector) por anotaciones prometheus.io/* del pod.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: kube-state-metrics
+    repo: https://prometheus-community.github.io/helm-charts
+    version: 8.8.0            # appVersion 2.20.0
+    releaseName: kube-state-metrics
+    namespace: observability
+    includeCRDs: false
+    valuesInline:
+      fullnameOverride: kube-state-metrics   # Service 'kube-state-metrics' (contrato, seccion 5)
+      image:
+        tag: v2.20.0                         # fijada explicitamente (= appVersion del chart)
+      replicas: 1
+      service:
+        port: 8080
+      prometheusScrape: false                # anotaciones en el pod (abajo), no en el Service
+      podAnnotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+      # Laboratorio: se excluyen colectores de poco valor para los dashboards estandar y de alta cardinalidad.
+      collectorsExclude:
+        - certificatesigningrequests
+        - leases
+        - volumeattachments
+        - validatingwebhookconfigurations
+        - mutatingwebhookconfigurations
+        - ingresses
+        - networkpolicies
+        - storageclasses
+      resources:
+        requests: {cpu: 20m, memory: 96Mi}
+        limits: {memory: 256Mi}
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}

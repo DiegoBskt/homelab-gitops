@@ -1,3 +1,7 @@
 title = "homelab-gitops"
 [extend]
 useDefault = true
+
+[allowlist]
+description = "Cache local de charts descargados por kustomize (ignorada por git; contiene ejemplos y tests del upstream)"
+paths = ['''apps/[^/]+/base/charts/''']

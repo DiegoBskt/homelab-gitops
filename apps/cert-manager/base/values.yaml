@@ -1,0 +1,36 @@
+# Valores minimos de laboratorio (1 replica). Requests de memoria: 64+32+64 = 160 MiB.
+crds:
+  enabled: true      # CRDs dentro del release (Argo CD los aplica con ServerSideApply)
+  keep: false        # sin anotacion helm.sh/resource-policy: keep (Argo CD gestiona el ciclo de vida)
+enableCertificateOwnerRef: false
+# Con prometheus.enabled (por defecto) el chart añade prometheus.io/scrape|port|path a controlador y webhook (puerto 9402).
+# No hay Prometheus Operator: no se crean ServiceMonitor/PodMonitor.
+# El Job post-install 'startupapicheck' sobra: el orden lo dan las sync-waves (el webhook debe estar Healthy antes de la ola 1).
+startupapicheck:
+  enabled: false
+prometheus:
+  enabled: true
+  servicemonitor: {enabled: false}
+resources:
+  requests: {cpu: 20m, memory: 64Mi}
+  limits: {memory: 256Mi}
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
+webhook:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: {drop: [ALL]}
+cainjector:
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {memory: 256Mi}
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: {drop: [ALL]}

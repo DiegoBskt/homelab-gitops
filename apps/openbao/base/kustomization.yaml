@@ -1,0 +1,14 @@
+# OpenBao: chart oficial openbao/openbao-helm (version fijada). Standalone, UI activada, sin injector.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - httproute.yaml
+helmCharts:
+  - name: openbao
+    repo: https://openbao.github.io/openbao-helm
+    version: 0.30.6
+    releaseName: openbao   # Service 'openbao' (8200) en el namespace openbao
+    namespace: openbao
+    includeCRDs: false
+    skipTests: true   # sin el Pod de prueba 'openbao-server-test'
+    valuesFile: values.yaml

@@ -1,0 +1,23 @@
+# Configuracion de identidades S3 de SeaweedFS construida con la misma credencial (kv/platform/s3).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: seaweedfs-s3-config
+  namespace: storage
+  labels: {app.kubernetes.io/part-of: homelab}
+spec:
+  refreshInterval: 15m
+  secretStoreRef: {kind: ClusterSecretStore, name: openbao}
+  target:
+    name: seaweedfs-s3-config
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        seaweedfs_s3_config: |
+          {"identities":[{"name":"platform","credentials":[{"accessKey":{{ .accessKey | toJson }},"secretKey":{{ .secretKey | toJson }}}],"actions":["Admin","Read","Write","List","Tagging"]}]}
+  data:
+    - secretKey: accessKey
+      remoteRef: {key: platform/s3, property: access-key}
+    - secretKey: secretKey
+      remoteRef: {key: platform/s3, property: secret-key}

@@ -1,0 +1,181 @@
+# Valores del chart open-telemetry/opentelemetry-collector (0.178.2) para el AGENTE (DaemonSet, 1 pod por nodo).
+#   - logs de contenedores: filelog sobre /var/log/pods (formato CRI/containerd, parseo del preset logsCollection),
+#     enriquecidos con k8sattributes (solo los pods de su nodo) -> Loki por OTLP (directo, sin pasar por el gateway)
+#   - metricas del kubelet (job=kubelet) y de cAdvisor (job=cadvisor) de su nodo -> Mimir (prometheus_remote_write)
+# Nombre del clúster: variable CLUSTER_NAME (la añade cada overlay). '$$' = '$' escapado; '${env:X}' = variable.
+nameOverride: otel-agent
+fullnameOverride: otel-agent
+mode: daemonset
+
+image:
+  repository: docker.io/otel/opentelemetry-collector-contrib
+  tag: 0.163.2                    # = appVersion del chart; fijada
+command:
+  name: otelcol-contrib
+
+# El agente no recibe OTLP de las apps (eso es del gateway): sin puertos de aplicacion ni hostPort.
+ports:
+  otlp: {enabled: false}
+  otlp-http: {enabled: false}
+  jaeger-compact: {enabled: false}
+  jaeger-thrift: {enabled: false}
+  jaeger-grpc: {enabled: false}
+  zipkin: {enabled: false}
+  metrics: {enabled: true, containerPort: 8888, servicePort: 8888, protocol: TCP}
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8888"
+  prometheus.io/path: /metrics
+
+# Tambien en el control-plane (en kind lleva el taint node-role.kubernetes.io/control-plane).
+tolerations:
+  - operator: Exists
+
+# Monta /var/log/pods (y /var/lib/docker/containers) en solo lectura y añade el receptor filelog con el parser de
+# contenedores (CRI). No se guardan checkpoints (evita hostPath de escritura): al reiniciar el agente se sigue
+# desde el final; en un laboratorio es aceptable, se pueden perder las lineas del hueco.
+presets:
+  logsCollection:
+    enabled: true
+    includeCollectorLogs: false
+    storeCheckpoints: false
+
+extraEnvs:
+  - name: K8S_NODE_NAME
+    valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+  - name: K8S_NODE_IP
+    valueFrom: {fieldRef: {fieldPath: status.hostIP}}
+
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 256Mi}
+
+# Los ficheros de /var/log/pods son root:root 0640, asi que el agente corre como root (UID 0) pero sin
+# capacidades, sin escalada y con sistema de ficheros raiz de solo lectura. Desviacion respecto a 'runAsNonRoot'.
+podSecurityContext:
+  runAsUser: 0
+  runAsGroup: 0
+  seccompProfile: {type: RuntimeDefault}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
+
+# RBAC minimo: k8sattributes (pods, namespaces, replicasets) y acceso a /metrics y /metrics/cadvisor del kubelet.
+clusterRole:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: [pods, namespaces]
+      verbs: [get, list, watch]
+    - apiGroups: [apps]
+      resources: [replicasets]
+      verbs: [get, list, watch]
+    - apiGroups: [""]
+      resources: [nodes/metrics]
+      verbs: [get]
+
+config:
+  extensions:
+    health_check:
+      endpoint: ${env:MY_POD_IP}:13133
+  receivers:
+    jaeger: null
+    zipkin: null
+    otlp: null
+    # Kubelet y cAdvisor de ESTE nodo (IP del nodo, :10250, HTTPS).
+    # TLS: en kind el certificado de servicio del kubelet esta firmado por una CA propia del nodo que los pods no
+    # tienen, asi que se usa insecure_skip_verify (tráfico solo dentro de la red de nodos del clúster, token del
+    # ServiceAccount como credencial). En un clúster real: montar la CA y usar ca_file o servername.
+    prometheus:
+      config:
+        global:
+          scrape_interval: 30s
+          scrape_timeout: 20s
+        scrape_configs:
+          - job_name: kubelet
+            scheme: https
+            metrics_path: /metrics
+            honor_labels: true
+            authorization: {credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token}
+            tls_config: {insecure_skip_verify: true}
+            static_configs:
+              - targets: ["${env:K8S_NODE_IP}:10250"]
+            relabel_configs:
+              - {target_label: instance, replacement: "${env:K8S_NODE_NAME}"}
+              - {target_label: node, replacement: "${env:K8S_NODE_NAME}"}
+              - {source_labels: [__metrics_path__], target_label: metrics_path}
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                regex: "(apiserver_request_duration_seconds_bucket|rest_client_rate_limiter_duration_seconds_bucket|rest_client_request_duration_seconds_bucket|storage_operation_duration_seconds_bucket)"
+                action: drop
+          - job_name: cadvisor
+            scheme: https
+            metrics_path: /metrics/cadvisor
+            honor_labels: true
+            authorization: {credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token}
+            tls_config: {insecure_skip_verify: true}
+            static_configs:
+              - targets: ["${env:K8S_NODE_IP}:10250"]
+            relabel_configs:
+              - {target_label: instance, replacement: "${env:K8S_NODE_NAME}"}
+              - {target_label: node, replacement: "${env:K8S_NODE_NAME}"}
+              - {source_labels: [__metrics_path__], target_label: metrics_path}
+            metric_relabel_configs:
+              # Series de alta cardinalidad y poco uso en los dashboards estandar
+              - source_labels: [__name__]
+                regex: "container_(network_tcp_usage_total|network_udp_usage_total|tasks_state|cpu_load_average_10s|memory_failures_total)"
+                action: drop
+  processors:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    batch:
+      send_batch_size: 4096
+      timeout: 10s
+    # Solo vigila los pods de este nodo; asocia por UID de pod (lo extrae filelog del nombre del directorio).
+    k8sattributes:
+      auth_type: serviceAccount
+      passthrough: false
+      filter:
+        node_from_env_var: K8S_NODE_NAME
+      extract:
+        metadata: [k8s.namespace.name, k8s.pod.name, k8s.pod.uid, k8s.node.name, service.name]
+      pod_association:
+        - sources: [{from: resource_attribute, name: k8s.pod.uid}]
+    resource/cluster:
+      attributes:
+        - {key: cluster, value: "${env:CLUSTER_NAME}", action: upsert}
+        - {key: k8s.cluster.name, value: "${env:CLUSTER_NAME}", action: upsert}
+  exporters:
+    debug: null
+    otlphttp/loki:
+      endpoint: http://loki.observability.svc.cluster.local:3100/otlp
+    prometheus_remote_write:
+      endpoint: http://mimir.observability.svc.cluster.local:8080/api/v1/push
+      tls: {insecure: true}
+      external_labels: {cluster: "${env:CLUSTER_NAME}"}
+      translation_strategy: UnderscoreEscapingWithoutSuffixes
+      target_info: {enabled: false}
+      disable_scope_info: true
+      remote_write_queue: {enabled: true, queue_size: 2000, num_consumers: 1}
+  service:
+    telemetry:
+      metrics:
+        readers:
+          - pull:
+              exporter:
+                prometheus: {host: "${env:MY_POD_IP}", port: 8888}
+    extensions: [health_check]
+    pipelines:
+      traces: null
+      logs:
+        receivers: []          # el preset logsCollection añade filelog
+        processors: [memory_limiter, k8sattributes, resource/cluster, batch]
+        exporters: [otlphttp/loki]
+      metrics:
+        receivers: [prometheus]
+        processors: [memory_limiter, batch]
+        exporters: [prometheus_remote_write]

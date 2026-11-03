@@ -1,0 +1,118 @@
+# Values del chart grafana-community/loki 20.3.0 (Loki 3.7.9) — modo monolitico de laboratorio.
+# Chart: oci://ghcr.io/grafana-community/helm-charts/loki (el repo grafana/helm-charts ya no lo publica).
+# El subchart de MinIO ya no existe en esta version del chart (MinIO esta archivado): se usa SeaweedFS (S3).
+
+# `Monolithic` es el nombre actual de `SingleBinary` (deprecado). Un solo pod con todos los modulos
+# (incluidos compactor y ruler). Las replicas de los demas componentes se ponen a 0 (lo exige la validacion del chart).
+deploymentMode: Monolithic
+# Nombre del Service = `loki` (contrato seccion 5: loki.observability.svc:3100).
+fullnameOverride: loki
+
+loki:
+  auth_enabled: false            # un solo tenant (contrato seccion 2)
+  commonConfig:
+    replication_factor: 1
+  # Las credenciales llegan por entorno (Secret `s3-credentials`, clave AWS_*), expandidas por -config.expand-env=true.
+  storage:
+    type: s3
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+    s3:
+      endpoint: http://seaweedfs-s3.storage.svc.cluster.local:8333
+      region: us-east-1
+      accessKeyId: ${AWS_ACCESS_KEY_ID}          # referencia a variable de entorno, no es un secreto
+      secretAccessKey: ${AWS_SECRET_ACCESS_KEY}  # idem
+      s3ForcePathStyle: true
+      insecure: true
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  ingester:
+    chunk_encoding: snappy
+    wal:
+      flush_on_shutdown: true
+  # Retencion 7 dias: la aplica el compactor (retention_enabled) borrando objetos en S3.
+  # delete_request_store es obligatorio con retention_enabled.
+  compactor:
+    working_directory: /var/loki/compactor
+    retention_enabled: true
+    delete_request_store: s3
+    retention_delete_delay: 2h
+  limits_config:
+    retention_period: 168h
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    max_cache_freshness_per_query: 10m
+    split_queries_by_interval: 15m
+    query_timeout: 300s
+    volume_enabled: true
+    allow_structured_metadata: true
+    # OTLP: por defecto Loki indexa pocos atributos. Se indexan solo los del contrato (seccion 9);
+    # el resto de atributos de recurso/log pasan a structured metadata. Los puntos se convierten en `_`.
+    otlp_config:
+      resource_attributes:
+        ignore_defaults: true
+        attributes_config:
+          - action: index_label
+            attributes:
+              - cluster
+              - k8s.namespace.name
+              - k8s.pod.name
+              - k8s.container.name
+              - service.name
+              - k8s.node.name
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3100"
+    prometheus.io/path: /metrics
+
+defaults:
+  # (el chart ya añade -config.expand-env=true a los argumentos de Loki)
+  extraEnvFrom:
+    - secretRef:
+        name: s3-credentials
+
+singleBinary:
+  replicas: 1
+  # Sin sidecar de reglas (ahorra un contenedor; las reglas no se cargan desde ConfigMaps).
+  sidecar: false
+  # Un solo nodo logico: sin anti-afinidad (el chart la pone obligatoria) ni PDB.
+  affinity: null
+  podDisruptionBudget:
+    enabled: false
+  persistence:
+    enabled: true
+    size: 5Gi            # solo WAL, indice TSDB local y cache del compactor; los chunks van a S3
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 1Gi}
+
+# --- Componentes del modo escalable/distribuido: desactivados ---
+backend: {replicas: 0}
+read: {replicas: 0}
+write: {replicas: 0}
+ingester: {replicas: 0}
+querier: {replicas: 0}
+queryFrontend: {replicas: 0}
+queryScheduler: {replicas: 0}
+distributor: {replicas: 0}
+compactor: {replicas: 0}
+indexGateway: {replicas: 0}
+bloomGateway: {replicas: 0}
+ruler: {replicas: 0}      # el ruler corre dentro del binario unico
+
+# --- Extras desactivados ---
+memcached: {enabled: false}
+rbac: {namespaced: true}   # Role en vez de ClusterRole (solo lo usa el sidecar de reglas, desactivado)
+chunksCache: {enabled: false}
+resultsCache: {enabled: false}
+lokiCanary: {enabled: false}
+gateway: {enabled: false}
+test: {enabled: false}

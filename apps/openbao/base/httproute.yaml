@@ -1,0 +1,15 @@
+# UI de OpenBao: https://openbao.hub.localtest.me (sin sectionName: atacha a http y https).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: openbao
+  namespace: openbao
+  labels: {app.kubernetes.io/part-of: homelab}
+  annotations: {argocd.argoproj.io/sync-wave: "1"}
+spec:
+  parentRefs:
+    - {name: eg, namespace: gateway-system}
+  hostnames: [openbao.hub.localtest.me]
+  rules:
+    - backendRefs:
+        - {name: openbao, port: 8200}

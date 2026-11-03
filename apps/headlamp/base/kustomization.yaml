@@ -1,0 +1,75 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: headlamp
+
+resources:
+  - rbac.yaml
+
+helmCharts:
+  - name: headlamp
+    # Chart oficial de kubernetes-sigs (proyecto SIG UI, activo). Repo http clasico.
+    repo: https://kubernetes-sigs.github.io/headlamp/
+    version: 0.46.0   # appVersion 0.46.0 (ghcr.io/headlamp-k8s/headlamp)
+    releaseName: headlamp
+    namespace: headlamp
+    valuesInline:
+      fullnameOverride: headlamp   # Service "headlamp" :80 (contrato seccion 5)
+      replicaCount: 1
+      config:
+        inCluster: true
+        inClusterContextName: hub
+        # Sin OIDC. Headlamp NO usa su ServiceAccount para atender a los usuarios
+        # (unsafeUseServiceAccountToken=false): cada usuario pega un token en el login
+        # (ver docs/runbooks/headlamp-access.md) y los permisos son los de ese token.
+        unsafeUseServiceAccountToken: false
+        oidc:
+          secret:
+            create: false   # no crear el Secret "oidc" vacio
+      # El Pod de Headlamp no necesita permisos RBAC: se conserva su ServiceAccount (sin bindings)
+      # y se desactiva el ClusterRoleBinding a cluster-admin que crea el chart por defecto.
+      clusterRoleBinding:
+        create: false
+      serviceAccount:
+        create: true
+        name: headlamp
+      # El token del SA solo sirve para descubrir el API server (CA + endpoint) y no tiene permisos.
+      automountServiceAccountToken: true
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      securityContext:
+        runAsNonRoot: true
+        privileged: false
+        runAsUser: 100
+        runAsGroup: 101
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true   # probado con docker --read-only + tmpfs /tmp
+        capabilities:
+          drop: [ALL]
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      resources:
+        requests: {cpu: 50m, memory: 96Mi}
+        limits: {memory: 192Mi}
+      podLabels:
+        app.kubernetes.io/part-of: homelab
+      service:
+        type: ClusterIP
+        port: 80
+      httpRoute:
+        enabled: true
+        parentRefs:
+          - name: eg
+            namespace: gateway-system
+        hostnames:
+          - headlamp.hub.localtest.me

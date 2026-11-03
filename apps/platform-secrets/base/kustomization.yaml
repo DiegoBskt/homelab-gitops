@@ -1,0 +1,8 @@
+# Todos los ExternalSecret de la plataforma (contrato, seccion 7). Los CRDs llegan con la app external-secrets:
+# la Application lleva retry + SkipDryRunOnMissingResource.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - s3-credentials.yaml
+  - seaweedfs-s3-config.yaml
+  - grafana-admin.yaml

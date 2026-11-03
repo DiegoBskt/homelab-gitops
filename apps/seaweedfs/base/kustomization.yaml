@@ -1,0 +1,105 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# SeaweedFS en modo "all-in-one" (master + volume + filer + S3 en un solo pod): almacenamiento
+# S3 del laboratorio (contrato, seccion 6). Namespace `storage` (lo crea apps/namespaces).
+resources:
+  - service-s3.yaml
+# El chart 4.52.0 renderiza SIEMPRE `seaweedfs-sftp-secret` con contraseñas y una clave SSH
+# aleatorias (aunque SFTP este desactivado y nada lo use): cambiaria en cada render
+# (deriva perpetua en Argo CD) y metaria material sensible en git/CI. Se elimina.
+patches:
+  - target: {kind: Secret, name: seaweedfs-sftp-secret}
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: seaweedfs-sftp-secret
+helmCharts:
+  - name: seaweedfs
+    repo: https://seaweedfs.github.io/seaweedfs/helm
+    version: 4.52.0
+    # Con releaseName=seaweedfs los recursos se llaman `seaweedfs-*` (p. ej. el Service
+    # del chart es `seaweedfs-all-in-one`; el contrato exige ademas `seaweedfs-s3`).
+    releaseName: seaweedfs
+    namespace: storage
+    valuesInline:
+      # --- Topologia: SOLO all-in-one. Si no se desactivan, el chart despliega tambien
+      # master/volume/filer separados y duplicados.
+      master:
+        enabled: false
+      volume:
+        enabled: false
+      filer:
+        enabled: false
+
+      global:
+        seaweedfs:
+          # Sin ClusterRole/Binding extra: no hacen falta para un all-in-one de laboratorio.
+          createClusterRole: false
+          # Directorio temporal escribible (el contenedor usa raiz de solo lectura).
+          tmpDir:
+            sizeLimit: 256Mi
+
+      allInOne:
+        enabled: true
+        replicas: 1
+        # Vacio => sin anti-afinidad obligatoria (una sola replica en un cluster kind).
+        affinity: ""
+
+        # Datos en PVC de la StorageClass por defecto (`standard`).
+        data:
+          type: persistentVolumeClaim
+          size: 10Gi
+
+        # Puerto de metricas de Prometheus del all-in-one (values del chart: 9324).
+        metricsPort: 9324
+        podAnnotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "9324"
+          prometheus.io/path: /metrics
+
+        s3:
+          enabled: true
+          # Autenticacion con identidades de un Secret existente (lo crea platform-secrets
+          # mediante un ExternalSecret; aqui solo se referencia). Clave: seaweedfs_s3_config.
+          enableAuth: true
+          existingConfigSecret: seaweedfs-s3-config
+          # Buckets del contrato (seccion 5). Se crean en un Job post-install/post-upgrade.
+          createBuckets:
+            - name: mimir-blocks
+            - name: mimir-ruler
+            - name: mimir-alertmanager
+            - name: loki-chunks
+            - name: loki-ruler
+            - name: tempo-traces
+          createBucketsHook:
+            resources:
+              requests: {cpu: 10m, memory: 32Mi}
+              limits: {memory: 128Mi}
+
+        # Presupuesto del contrato: SeaweedFS <= 600 MiB de requests de memoria.
+        resources:
+          requests: {cpu: 100m, memory: 512Mi}
+          limits: {memory: 1Gi}
+
+        podSecurityContext:
+          enabled: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          fsGroup: 1000
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        containerSecurityContext:
+          enabled: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          runAsNonRoot: true
+          privileged: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+          seccompProfile:
+            type: RuntimeDefault

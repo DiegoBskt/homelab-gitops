@@ -1,0 +1,72 @@
+# OpenBao standalone de laboratorio. Requests de memoria: 128 MiB.
+global:
+  enabled: true
+injector:
+  enabled: false
+csi:
+  enabled: false
+server:
+  # HTTP sin TLS dentro del clúster (contrato seccion 5). Almacenamiento pebbledb en PVC pequeño.
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 384Mi}
+  dataStorage:
+    enabled: true
+    size: 1Gi
+  # Argo CD debe ver la app Healthy aunque OpenBao este sin inicializar o sellado (init/unseal son un gate manual):
+  # 204 en lugar de 501 (sin inicializar) / 503 (sellado), y standbyok.
+  readinessProbe:
+    enabled: true
+    path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+    port: 8200
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    failureThreshold: 3
+    timeoutSeconds: 3
+  livenessProbe:
+    enabled: false   # un OpenBao sellado no debe reiniciarse en bucle
+  # Metricas Prometheus sin autenticacion (telemetry.unauthenticated_metrics_access; solo dentro del clúster).
+  # Nota: OpenBao sirve formato Prometheus en /v1/sys/metrics si el scraper pide OpenMetrics/text; si no, hay que
+  # añadir el parametro format=prometheus en el colector (las anotaciones no admiten query string).
+  # Cuando esta sellado el endpoint responde 503: es esperado.
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8200"
+    prometheus.io/path: /v1/sys/metrics
+  extraLabels: {}
+  statefulSet:
+    securityContext:
+      pod:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      container:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+
+      listener "tcp" {
+        tls_disable = 1
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+        telemetry {
+          unauthenticated_metrics_access = "true"
+        }
+      }
+
+      storage "pebbledb" {
+        path = "/openbao/data/pebbledb"
+      }
+
+      telemetry {
+        prometheus_retention_time = "30s"
+        disable_hostname = true
+      }
+ui:
+  enabled: true

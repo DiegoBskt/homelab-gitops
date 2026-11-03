@@ -1,0 +1,164 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Mimir en modo laboratorio (chart mimir-distributed 6.2.2 = Mimir 3.2.3), arquitectura CLASICA
+# (ingesters + almacenamiento en S3) con 1 replica de cada componente.
+# Namespace `observability` (lo crea apps/namespaces). Almacenamiento: SeaweedFS (apps/seaweedfs).
+# El Job `mimir-smoke-test` (hook `helm.sh/hook: test`) no es un recurso de despliegue: se elimina.
+patches:
+  - target: {kind: Job, name: mimir-smoke-test}
+    patch: |-
+      $patch: delete
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: mimir-smoke-test
+helmCharts:
+  - name: mimir-distributed
+    # El chart sigue en grafana/helm-charts (no esta en grafana-community a fecha de verificacion).
+    repo: https://grafana.github.io/helm-charts
+    version: 6.2.2
+    releaseName: mimir
+    namespace: observability
+    valuesInline:
+      # ---------------- Dependencias y funciones desactivadas ----------------
+      # Subchart de MinIO: deprecado (proyecto archivado); usamos SeaweedFS.
+      minio:
+        enabled: false
+      # Kafka/ingest storage: el chart 6.x lo activa por defecto (solo "demo"). En laboratorio
+      # se usa la arquitectura clasica, mas ligera (ver mimir.structuredConfig.ingest_storage).
+      kafka:
+        enabled: false
+      # Rollout-operator: solo hace falta con zone-awareness (y trae webhooks/CRDs).
+      rollout_operator:
+        enabled: false
+      # Cachés memcached fuera (ahorro de RAM).
+      chunks-cache:
+        enabled: false
+      index-cache:
+        enabled: false
+      metadata-cache:
+        enabled: false
+      results-cache:
+        enabled: false
+      alertmanager:
+        enabled: false
+      overrides_exporter:
+        enabled: false
+
+      # ---------------- Credenciales S3 ----------------
+      # Secret `s3-credentials` (lo crea platform-secrets/ESO): sus claves
+      # AWS_ACCESS_KEY_ID y AWS_SECRET_ACCESS_KEY llegan como variables de entorno a todos
+      # los pods y la configuracion las expande (-config.expand-env=true).
+      global:
+        extraEnvFrom:
+          - secretRef:
+              name: s3-credentials
+        # Metricas para el scraping de los colectores OTel (contrato, seccion 9).
+        podAnnotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8080"
+          prometheus.io/path: /metrics
+
+      mimir:
+        structuredConfig:
+          # Un solo tenant (contrato, seccion 2).
+          multitenancy_enabled: false
+          # Arquitectura clasica: sin Kafka.
+          ingest_storage:
+            enabled: false
+          # Un solo ingester / store-gateway => factor de replicacion 1.
+          ingester:
+            push_grpc_method_enabled: true
+            ring:
+              replication_factor: 1
+          store_gateway:
+            sharding_ring:
+              replication_factor: 1
+          # Bloques de metricas y reglas del ruler en SeaweedFS (S3, HTTP, path-style).
+          # `bucket_lookup_type: path` fuerza path-style; las credenciales vienen del entorno.
+          blocks_storage:
+            backend: s3
+            s3: &s3
+              endpoint: seaweedfs-s3.storage.svc.cluster.local:8333
+              region: us-east-1
+              insecure: true
+              bucket_lookup_type: path
+              access_key_id: ${AWS_ACCESS_KEY_ID}
+              secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+              bucket_name: mimir-blocks
+          ruler_storage:
+            backend: s3
+            s3:
+              <<: *s3
+              bucket_name: mimir-ruler
+
+      # El chart ya añade -config.expand-env=true a todos los componentes.
+      distributor:
+        replicas: 1
+        resources:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits: {memory: 512Mi}
+      ingester:
+        replicas: 1
+        zoneAwareReplication:
+          enabled: false
+        persistentVolume:
+          size: 5Gi
+        resources:
+          requests: {cpu: 100m, memory: 512Mi}
+          limits: {memory: 1Gi}
+      querier:
+        replicas: 1
+        resources:
+          requests: {cpu: 50m, memory: 256Mi}
+          limits: {memory: 1Gi}
+      query_frontend:
+        replicas: 1
+        resources:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits: {memory: 512Mi}
+      query_scheduler:
+        replicas: 1
+        resources:
+          requests: {cpu: 25m, memory: 64Mi}
+          limits: {memory: 256Mi}
+      store_gateway:
+        replicas: 1
+        zoneAwareReplication:
+          enabled: false
+        persistentVolume:
+          size: 2Gi
+        resources:
+          requests: {cpu: 50m, memory: 256Mi}
+          limits: {memory: 1Gi}
+      compactor:
+        replicas: 1
+        persistentVolume:
+          size: 2Gi
+        resources:
+          requests: {cpu: 50m, memory: 256Mi}
+          limits: {memory: 1Gi}
+      ruler:
+        enabled: true
+        replicas: 1
+        resources:
+          requests: {cpu: 25m, memory: 128Mi}
+          limits: {memory: 512Mi}
+
+      # ---------------- Gateway (Service `mimir`:8080) ----------------
+      # El gateway unificado (nginx) enruta /api/v1/push, /otlp y /prometheus. Es la via
+      # soportada en 6.x (el bloque `nginx` de nivel superior se elimino). El Service se llama
+      # `mimir` y escucha en 8080 (puerto "legacy" 8080 deprecado desactivado: el puerto
+      # principal pasa a ser 8080 directamente).
+      gateway:
+        enabled: true
+        replicas: 1
+        service:
+          nameOverride: mimir
+          port: 8080
+          legacyPort: 0   # 0 = desactivado (null no sobrevive a la fusion de valores de kustomize)
+        nginx:
+          verboseLogging: false
+        resources:
+          requests: {cpu: 25m, memory: 64Mi}
+          limits: {memory: 256Mi}

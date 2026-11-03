@@ -1,0 +1,5 @@
+# Overlay del clúster hub: sin ajustes propios por ahora (la etiqueta cluster=hub la añaden los colectores).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base

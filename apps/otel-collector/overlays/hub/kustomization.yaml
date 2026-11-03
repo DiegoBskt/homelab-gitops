@@ -1,0 +1,16 @@
+# Ajustes especificos del clúster 'hub': solo el nombre del clúster (etiqueta cluster / k8s.cluster.name en toda señal).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target: {kind: Deployment, name: otel-gateway}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: CLUSTER_NAME, value: hub}
+  - target: {kind: DaemonSet, name: otel-agent-agent}   # el chart añade el sufijo -agent en modo daemonset
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: CLUSTER_NAME, value: hub}

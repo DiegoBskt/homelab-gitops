@@ -1,0 +1,196 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Todo el contenido vive en el namespace observability (lo crea apps/namespaces).
+namespace: observability
+
+# Dashboards como codigo: un ConfigMap por carpeta de Grafana, montado como fichero (provider "file").
+# - Sin sidecar: ahorra un contenedor (~50 MiB) y los permisos RBAC para listar ConfigMaps.
+# - disableNameSuffixHash: el chart referencia los ConfigMaps por nombre fijo (extraConfigmapMounts).
+#   Grafana relee los ficheros cada 30 s (updateIntervalSeconds), no hace falta reiniciar el pod.
+# - Cada ConfigMap pesa < 300 KiB (limite de objeto: 1 MiB); JSON minificado para ahorrar espacio.
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    app.kubernetes.io/part-of: homelab
+    app.kubernetes.io/name: grafana
+configMapGenerator:
+  - name: grafana-dashboards-kubernetes
+    files:
+      - dashboards/kubernetes/k8s-views-global.json
+      - dashboards/kubernetes/k8s-views-namespaces.json
+      - dashboards/kubernetes/k8s-views-nodes.json
+      - dashboards/kubernetes/k8s-views-pods.json
+  - name: grafana-dashboards-platform
+    files:
+      - dashboards/platform/cilium-agent.json
+      - dashboards/platform/cilium-operator.json
+      - dashboards/platform/hubble.json
+      - dashboards/platform/envoy-gateway-global.json
+      - dashboards/platform/envoy-proxy-global.json
+      - dashboards/platform/envoy-clusters.json
+      - dashboards/platform/argocd.json
+  - name: grafana-dashboards-explore
+    files:
+      - dashboards/explore/logs-explorer.json
+      - dashboards/explore/traces-explorer.json
+
+helmCharts:
+  - name: grafana
+    # El repo antiguo https://grafana.github.io/helm-charts esta marcado deprecated (ultima 10.5.15, Grafana 12.3.1).
+    # El chart se mantiene ahora en grafana-community.
+    repo: https://grafana-community.github.io/helm-charts
+    version: 14.3.1   # appVersion Grafana 13.3.0
+    releaseName: grafana
+    namespace: observability
+    valuesInline:
+      fullnameOverride: grafana   # Service "grafana" (contrato seccion 5)
+      replicas: 1
+      testFramework:
+        enabled: false
+      # Sin ClusterRole/ServiceAccount token: sin sidecar, Grafana no habla con la API de Kubernetes.
+      rbac:
+        create: false
+      automountServiceAccountToken: false
+      service:
+        type: ClusterIP
+        port: 80
+        targetPort: 3000
+      resources:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {memory: 512Mi}
+      # goMemLimit del chart (0.9 * limite) ya esta activo por defecto.
+      # Sin persistencia (emptyDir): datasources, dashboards y usuario admin son codigo/Secret.
+      # Con un PVC la contraseña admin guardada en la BD dejaria de seguir al Secret rotado.
+      # Se pierden solo preferencias de UI y dashboards creados a mano.
+      persistence:
+        enabled: false
+      initChownData:
+        enabled: false      # solo hace falta con PVC; evita un initContainer root
+      # Admin desde el Secret existente "grafana-admin" (lo crea ESO desde kv/platform/grafana).
+      admin:
+        existingSecret: grafana-admin
+        userKey: admin-user
+        passwordKey: admin-password
+      podAnnotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: /metrics
+      podLabels:
+        app.kubernetes.io/part-of: homelab
+      grafana.ini:
+        server:
+          root_url: https://grafana.hub.localtest.me
+          domain: grafana.hub.localtest.me
+        analytics:
+          check_for_updates: false
+          check_for_plugin_updates: false
+          reporting_enabled: false
+        metrics:
+          enabled: true   # /metrics en :3000 (Grafana lo activa por defecto; se deja explicito)
+        users:
+          allow_sign_up: false
+        auth.anonymous:
+          enabled: false
+        log:
+          mode: console
+        dashboards:
+          default_home_dashboard_path: /var/lib/grafana-dashboards/kubernetes/k8s-views-global.json
+      # HTTPRoute del propio chart (Gateway API v1): host grafana.hub.localtest.me -> Service grafana:80.
+      route:
+        main:
+          enabled: true
+          hostnames:
+            - grafana.hub.localtest.me
+          parentRefs:
+            - name: eg
+              namespace: gateway-system
+      # ---- Datasources (provisioning por fichero). UIDs fijos: los dashboards y las correlaciones los usan.
+      # Escapar "$" como "$$" (Grafana interpola variables de entorno en los ficheros de provisioning).
+      datasources:
+        datasources.yaml:
+          apiVersion: 1
+          datasources:
+            - name: Mimir
+              uid: mimir
+              type: prometheus
+              access: proxy
+              url: http://mimir.observability.svc.cluster.local:8080/prometheus
+              isDefault: true
+              jsonData:
+                httpMethod: POST
+                prometheusType: Mimir
+                timeInterval: 30s
+                # Exemplars (metrica -> traza) solo si algun emisor los envia; inofensivo si no.
+                exemplarTraceIdDestinations:
+                  - name: trace_id
+                    datasourceUid: tempo
+            - name: Loki
+              uid: loki
+              type: loki
+              access: proxy
+              url: http://loki.observability.svc.cluster.local:3100
+              jsonData:
+                maxLines: 1000
+                # logs -> traza: trace_id llega como structured metadata (OTLP). matcherType "label"
+                # busca la clave en labels/structured metadata (no en el texto de la linea).
+                derivedFields:
+                  - name: TraceID
+                    matcherType: label
+                    matcherRegex: trace_?id
+                    datasourceUid: tempo
+                    url: "$${__value.raw}"
+                    urlDisplayLabel: Ver traza
+            - name: Tempo
+              uid: tempo
+              type: tempo
+              access: proxy
+              url: http://tempo.observability.svc.cluster.local:3200
+              jsonData:
+                # traza -> logs. Los tags de usuario NO se remapean solos: la clave es el atributo del span
+                # y "value" el label de Loki (puntos -> guion bajo, ver contrato seccion 2).
+                tracesToLogsV2:
+                  datasourceUid: loki
+                  spanStartTimeShift: -2m
+                  spanEndTimeShift: 2m
+                  tags:
+                    - key: k8s.pod.name
+                      value: k8s_pod_name
+                    - key: k8s.namespace.name
+                      value: k8s_namespace_name
+                  filterByTraceID: false   # los logs de contenedor (filelog) no suelen llevar trace_id
+                  filterBySpanID: false
+                # traza -> metricas (spanmetrics del metrics-generator de Tempo, si esta activo)
+                tracesToMetrics:
+                  datasourceUid: mimir
+                  spanStartTimeShift: -2m
+                  spanEndTimeShift: 2m
+                  tags:
+                    - key: service.name
+                      value: service
+                  queries:
+                    - name: Tasa de peticiones
+                      query: sum(rate(traces_spanmetrics_calls_total{$$__tags}[$$__rate_interval]))
+                    - name: Latencia p95
+                      query: histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[$$__rate_interval])) by (le))
+                serviceMap:
+                  datasourceUid: mimir
+                nodeGraph:
+                  enabled: true
+                search:
+                  hide: false
+                traceQuery:
+                  timeShiftEnabled: true
+                  spanStartTimeShift: -2m
+                  spanEndTimeShift: 2m
+      # ---- Dashboards: providers de tipo file sobre los ConfigMaps montados mas abajo.
+      dashboardProviders:
+        dashboardproviders.yaml:
+          apiVersion: 1
+          providers:
+            - {name: kubernetes, orgId: 1, folder: Kubernetes, type: file, disableDeletion: true, allowUiUpdates: false, updateIntervalSeconds: 30, options: {path: /var/lib/grafana-dashboards/kubernetes}}
+            - {name: platform, orgId: 1, folder: Plataforma, type: file, disableDeletion: true, allowUiUpdates: false, updateIntervalSeconds: 30, options: {path: /var/lib/grafana-dashboards/platform}}
+            - {name: explore, orgId: 1, folder: Explorar, type: file, disableDeletion: true, allowUiUpdates: false, updateIntervalSeconds: 30, options: {path: /var/lib/grafana-dashboards/explore}}
+      extraConfigmapMounts:
+        - {name: dashboards-kubernetes, mountPath: /var/lib/grafana-dashboards/kubernetes, configMap: grafana-dashboards-kubernetes, readOnly: true}
+        - {name: dashboards-platform, mountPath: /var/lib/grafana-dashboards/platform, configMap: grafana-dashboards-platform, readOnly: true}
+        - {name: dashboards-explore, mountPath: /var/lib/grafana-dashboards/explore, configMap: grafana-dashboards-explore, readOnly: true}

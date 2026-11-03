@@ -1,0 +1,15 @@
+# cert-manager: chart oficial de Jetstack (version fijada) + cadena de emision local.
+# Olas internas: chart (CRDs, controlador, webhook) en 0; ClusterIssuer 'selfsigned' en 1;
+# Certificate raiz en 2; ClusterIssuer 'local-ca' en 3 (necesita el Secret de la CA ya emitido).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - issuers.yaml
+helmCharts:
+  - name: cert-manager
+    repo: https://charts.jetstack.io
+    version: v1.21.3
+    releaseName: cert-manager
+    namespace: cert-manager
+    includeCRDs: true
+    valuesFile: values.yaml

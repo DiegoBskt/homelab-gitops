@@ -1,0 +1,14 @@
+# External Secrets Operator: chart oficial (version fijada), CRDs incluidos.
+# Chart en ola 0 (CRDs, operador, webhook); el ClusterSecretStore en ola 1.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - clustersecretstore.yaml
+helmCharts:
+  - name: external-secrets
+    repo: https://charts.external-secrets.io
+    version: 2.14.0
+    releaseName: external-secrets   # el ServiceAccount resultante es external-secrets/external-secrets
+    namespace: external-secrets
+    includeCRDs: true
+    valuesFile: values.yaml

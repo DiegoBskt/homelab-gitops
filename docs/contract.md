@@ -132,8 +132,8 @@ GET por rango, HEAD, copy, multi-delete, lifecycle, y rechazo con 403 sin creden
 | Ola | Componentes |
 |---|---|
 | -1 | `namespaces` |
-| 0 | cert-manager, CRDs de ESO, Envoy Gateway (existente) |
-| 1 | OpenBao (**gate manual**: init/unseal/configuracion), ESO + `ClusterSecretStore`, `ClusterIssuer`/CA, `platform-secrets` |
+| 0 | cert-manager, Envoy Gateway (existente) |
+| 1 | OpenBao (**gate manual**: init/unseal/configuracion), ESO (CRDs y operador van en la misma app) + `ClusterSecretStore`, `ClusterIssuer`/CA (olas 1-3 internas), `platform-secrets` |
 | 2 | SeaweedFS |
 | 3 | Mimir, Loki, Tempo |
 | 4 | otel-collector, kube-state-metrics, node-exporter, Grafana |

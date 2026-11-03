@@ -1,0 +1,48 @@
+# ServiceAccounts de acceso a la UI de Headlamp. Se usan SOLO para emitir tokens de corta duracion
+# con "kubectl create token" (docs/runbooks/headlamp-access.md). No hay tokens autogenerados:
+# automountServiceAccountToken=false y no se crean Secrets de tipo service-account-token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: headlamp-viewer
+  namespace: headlamp
+  labels: {app.kubernetes.io/part-of: homelab, app.kubernetes.io/name: headlamp}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: headlamp-admin
+  namespace: headlamp
+  labels: {app.kubernetes.io/part-of: homelab, app.kubernetes.io/name: headlamp}
+automountServiceAccountToken: false
+---
+# Solo lectura: ClusterRole agregado "view" (sin Secrets ni RBAC).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: headlamp-viewer
+  labels: {app.kubernetes.io/part-of: homelab, app.kubernetes.io/name: headlamp}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: headlamp-viewer
+    namespace: headlamp
+---
+# Control total del clúster. Emitir tokens de este SA solo cuando haga falta y con TTL corto.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: headlamp-admin
+  labels: {app.kubernetes.io/part-of: homelab, app.kubernetes.io/name: headlamp}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: headlamp-admin
+    namespace: headlamp

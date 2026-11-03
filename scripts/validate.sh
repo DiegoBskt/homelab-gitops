@@ -39,7 +39,7 @@ done
 if ls "$OUT"/*.yaml >/dev/null 2>&1; then
   step "2/5 kubeconform (K8s $K8S_VERSION + catalogo de CRDs; los CRD vendor se omiten)"
   kubeconform -strict -summary -kubernetes-version "$K8S_VERSION" -skip CustomResourceDefinition \
-    -schema-location default -schema-location "$CRD_CATALOG" "$OUT"/*.yaml || rc=1
+    -schema-location default -schema-location "$CRD_CATALOG" "$OUT"/*.yaml $(ls clusters/*/applications/*.yaml 2>/dev/null) || rc=1
 
   step "3/5 kube-linter ($MODE)"
   kube-linter lint --config .kube-linter.yaml --format json "$OUT" > "$KL" 2>/dev/null || true

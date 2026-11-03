@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: seaweedfs
+  namespace: argocd
+  annotations: {argocd.argoproj.io/sync-wave: "2"}
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/DiegoBskt/homelab-gitops.git
+    targetRevision: main
+    path: apps/seaweedfs/overlays/hub
+  destination: {server: https://kubernetes.default.svc, namespace: storage}
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [ServerSideApply=true, SkipDryRunOnMissingResource=true]
+    retry: {limit: 5, backoff: {duration: 10s, factor: 2, maxDuration: 3m}}

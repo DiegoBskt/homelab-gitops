@@ -1,0 +1,320 @@
+# Valores del chart open-telemetry/opentelemetry-collector (0.178.2) para el GATEWAY (Deployment, 1 replica).
+# Recibe OTLP de las apps (4317 gRPC / 4318 HTTP), hace el scraping Prometheus del clúster y enruta:
+#   metricas -> Mimir (prometheus_remote_write) · logs -> Loki (OTLP) · trazas -> Tempo (OTLP gRPC).
+# El nombre del clúster llega por la variable CLUSTER_NAME, que añade cada overlay (base sin datos de clúster).
+# Atencion: este fichero pasa por 'tpl' de Helm (evitar llaves dobles) y por la expansion del Collector:
+# '$$1' = '$1' de Prometheus (referencia de relabel), '${env:X}' = variable de entorno.
+nameOverride: otel-gateway
+fullnameOverride: otel-gateway     # Service 'otel-gateway' (contrato, seccion 5)
+mode: deployment
+replicaCount: 1
+
+image:
+  repository: docker.io/otel/opentelemetry-collector-contrib   # distribucion 'contrib'
+  tag: 0.163.2                                                 # = appVersion del chart; fijada
+command:
+  name: otelcol-contrib
+
+# Solo OTLP; sin jaeger/zipkin (el contrato no los pide).
+ports:
+  otlp: {enabled: true, containerPort: 4317, servicePort: 4317, protocol: TCP, appProtocol: grpc}
+  otlp-http: {enabled: true, containerPort: 4318, servicePort: 4318, protocol: TCP}
+  jaeger-compact: {enabled: false}
+  jaeger-thrift: {enabled: false}
+  jaeger-grpc: {enabled: false}
+  zipkin: {enabled: false}
+  metrics: {enabled: true, containerPort: 8888, servicePort: 8888, protocol: TCP}
+
+# Metricas internas del propio colector, recogidas por la descubierta por anotaciones.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8888"
+  prometheus.io/path: /metrics
+
+resources:
+  requests: {cpu: 100m, memory: 384Mi}
+  limits: {memory: 768Mi}        # memory_limiter y GOMEMLIMIT se calculan sobre este limite
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile: {type: RuntimeDefault}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
+
+# RBAC minimo: k8sattributes (pods, namespaces, replicasets) y descubrimiento de pods del scraping (pods).
+clusterRole:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: [pods, namespaces]
+      verbs: [get, list, watch]
+    - apiGroups: [apps]
+      resources: [replicasets]
+      verbs: [get, list, watch]
+
+config:
+  extensions:
+    health_check:
+      endpoint: ${env:MY_POD_IP}:13133
+  receivers:
+    jaeger: null
+    zipkin: null
+    otlp:
+      protocols:
+        grpc: {endpoint: "${env:MY_POD_IP}:4317"}
+        http: {endpoint: "${env:MY_POD_IP}:4318"}
+    prometheus:
+      config:
+        global:
+          scrape_interval: 30s
+          scrape_timeout: 15s
+        scrape_configs:
+        # --- Componentes propios (apps/kube-state-metrics y apps/node-exporter) ---
+        - job_name: kube-state-metrics
+          metrics_path: /metrics
+          honor_labels: true
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [observability]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "kube-state-metrics", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:8080", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        - job_name: node-exporter
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [observability]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "prometheus-node-exporter", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:9100", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        # --- Cilium (kube-system): el agente expone Cilium :9962 y Hubble :9965 (hostPort, hostNetwork) ---
+        - job_name: cilium-agent
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [kube-system]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_k8s_app], regex: "cilium", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:9962", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        - job_name: hubble
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [kube-system]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_k8s_app], regex: "cilium", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:9965", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        - job_name: cilium-operator
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [kube-system]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_io_cilium_app], regex: "operator", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:9963", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        # --- Envoy Gateway: controlador (/metrics) y proxy de datos (/stats/prometheus), ambos en :19001 ---
+        - job_name: envoy-gateway
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [envoy-gateway-system]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_control_plane], regex: "envoy-gateway", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:19001", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        - job_name: envoy-proxy
+          metrics_path: /stats/prometheus
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [envoy-gateway-system]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component], regex: "proxy", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:19001", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        # --- Argo CD: el valor de 'job' replica el nombre del Service *-metrics (convencion de los dashboards) ---
+        - job_name: argocd-metrics
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [argocd]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "argocd-application-controller", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:8082", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        - job_name: argocd-server-metrics
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [argocd]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "argocd-server", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:8083", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        - job_name: argocd-repo-server
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [argocd]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "argocd-repo-server", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:8084", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        - job_name: argocd-applicationset-controller
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [argocd]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "argocd-applicationset-controller", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:8080", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        - job_name: argocd-notifications-controller-metrics
+          metrics_path: /metrics
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces: {names: [argocd]}
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "argocd-notifications-controller", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_ip], regex: "(.+)", replacement: "$$1:9001", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+        # --- Resto: cualquier pod con prometheus.io/scrape=true (+ prometheus.io/port y /path) ---
+        # Se excluyen los pods que ya tienen job propio arriba, para no duplicar series.
+        # job = <namespace>/<app.kubernetes.io/name> (o 'kubernetes-pods' si no hay etiqueta).
+        - job_name: kubernetes-pods
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - {source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], regex: "true", action: keep}
+            - {source_labels: [__meta_kubernetes_pod_phase], regex: "Pending|Succeeded|Failed", action: drop}
+            - {source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "observability;(kube-state-metrics|prometheus-node-exporter)", action: drop}
+            - {source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_k8s_app], regex: "kube-system;cilium", action: drop}
+            - {source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_io_cilium_app], regex: "kube-system;operator", action: drop}
+            - {source_labels: [__meta_kubernetes_namespace], regex: "envoy-gateway-system|argocd", action: drop}
+            - {source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], regex: "(.+)", target_label: __metrics_path__}
+            - {source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port], regex: "([^:]+)(?::\\d+)?;(\\d+)", replacement: "$$1:$$2", target_label: __address__}
+            - {source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "(.+);(.+)", replacement: "$$1/$$2", target_label: job}
+            - {source_labels: [__meta_kubernetes_namespace], target_label: namespace}
+            - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+            - {source_labels: [__meta_kubernetes_pod_node_name], target_label: node}
+  processors:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    batch:
+      send_batch_size: 8192
+      timeout: 10s
+    # Metadatos de Kubernetes de la señal OTLP entrante (asociacion por IP de origen / atributos del SDK).
+    k8sattributes:
+      auth_type: serviceAccount
+      passthrough: false
+      extract:
+        metadata: [k8s.namespace.name, k8s.pod.name, k8s.pod.uid, k8s.node.name, service.name]
+      pod_association:
+        - sources: [{from: resource_attribute, name: k8s.pod.ip}]
+        - sources: [{from: resource_attribute, name: k8s.pod.uid}]
+        - sources: [{from: connection}]
+    resource/cluster:
+      attributes:
+        - {key: cluster, value: "${env:CLUSTER_NAME}", action: upsert}
+        - {key: k8s.cluster.name, value: "${env:CLUSTER_NAME}", action: upsert}
+  exporters:
+    debug: null
+    # Metricas SCRAPEADAS: nombres y labels de Prometheus clasico. Sin sufijos de tipo/unidad (los nombres ya vienen
+    # de Prometheus), sin target_info ni labels otel_scope_*, sin atributos de recurso como labels
+    # (solo job/instance, que el exportador deriva de service.name/service.instance.id).
+    prometheus_remote_write/scrape:
+      endpoint: http://mimir.observability.svc.cluster.local:8080/api/v1/push
+      tls: {insecure: true}
+      external_labels: {cluster: "${env:CLUSTER_NAME}"}
+      translation_strategy: UnderscoreEscapingWithoutSuffixes
+      target_info: {enabled: false}
+      disable_scope_info: true
+      remote_write_queue: {enabled: true, queue_size: 5000, num_consumers: 1}
+    # Metricas OTLP de las apps: traduccion estandar OTLP->Prometheus (con sufijos _total/_seconds...) y solo
+    # los atributos de recurso que interesan como labels (acotado para no disparar la cardinalidad).
+    prometheus_remote_write/otlp:
+      endpoint: http://mimir.observability.svc.cluster.local:8080/api/v1/push
+      tls: {insecure: true}
+      external_labels: {cluster: "${env:CLUSTER_NAME}"}
+      translation_strategy: UnderscoreEscapingWithSuffixes
+      resource_constant_labels:
+        included: [k8s.namespace.name, k8s.pod.name, k8s.container.name, k8s.node.name]
+      remote_write_queue: {enabled: true, queue_size: 5000, num_consumers: 1}
+    otlphttp/loki:
+      endpoint: http://loki.observability.svc.cluster.local:3100/otlp
+    otlp/tempo:
+      endpoint: tempo.observability.svc.cluster.local:4317
+      tls: {insecure: true}
+  service:
+    telemetry:
+      metrics:
+        readers:
+          - pull:
+              exporter:
+                prometheus: {host: "${env:MY_POD_IP}", port: 8888}
+    extensions: [health_check]
+    pipelines:
+      metrics: null
+      metrics/scrape:
+        receivers: [prometheus]
+        processors: [memory_limiter, batch]
+        exporters: [prometheus_remote_write/scrape]
+      metrics/otlp:
+        receivers: [otlp]
+        processors: [memory_limiter, k8sattributes, resource/cluster, batch]
+        exporters: [prometheus_remote_write/otlp]
+      logs:
+        receivers: [otlp]
+        processors: [memory_limiter, k8sattributes, resource/cluster, batch]
+        exporters: [otlphttp/loki]
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, k8sattributes, resource/cluster, batch]
+        exporters: [otlp/tempo]

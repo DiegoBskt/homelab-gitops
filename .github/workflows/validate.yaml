@@ -20,3 +20,5 @@ jobs:
         run: FORCE=1 scripts/install-tools.sh
       - name: Validar
         run: scripts/validate.sh
+      - name: Verificar el contrato de interfaces
+        run: scripts/check-contract.sh

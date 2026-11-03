@@ -1,0 +1,35 @@
+# node-exporter: metricas de SO/HW de cada nodo (job=node-exporter).
+# Chart prometheus-community/prometheus-node-exporter (repo http, proyecto prometheus/node_exporter, activo).
+#
+# LIMITACION EN KIND: los nodos son contenedores Docker que comparten el kernel de la VM de WSL2. Por tanto
+# CPU, memoria, carga, red y vmstat (/proc) reflejan la VM completa y son (casi) identicos en los tres nodos;
+# los discos/filesystems muestran los del contenedor/overlay del nodo, no discos fisicos. Sigue siendo util
+# para los dashboards estandar (Node Exporter / USE), pero no representa tres maquinas distintas.
+# hostNetwork + hostPID + montaje de / (solo lectura) son los valores del chart y los que necesita node_exporter.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: prometheus-node-exporter
+    repo: https://prometheus-community.github.io/helm-charts
+    version: 4.60.1           # appVersion 1.12.1
+    releaseName: node-exporter
+    namespace: observability
+    valuesInline:
+      fullnameOverride: node-exporter
+      image:
+        tag: v1.12.1          # fijada explicitamente (= appVersion del chart)
+      hostNetwork: true       # puerto 9100 en la IP del nodo
+      hostPID: true
+      tolerations:            # tambien en el control-plane
+        - operator: Exists
+      service:
+        port: 9100
+        targetPort: 9100
+        portName: metrics
+      podAnnotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: /metrics
+      resources:
+        requests: {cpu: 20m, memory: 32Mi}
+        limits: {memory: 96Mi}

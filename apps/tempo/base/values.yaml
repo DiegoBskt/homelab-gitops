@@ -1,0 +1,98 @@
+# Values del chart grafana-community/tempo 3.2.1 (Tempo 3.1.1) — un solo binario, 1 replica.
+# El chart `grafana/tempo` (1.24.4, Tempo 2.9) esta marcado `deprecated: true`; el vigente es el de grafana-community.
+# NO es `tempo-distributed`.
+
+# Nombre del Service = `tempo` (contrato seccion 5: 3200, 4317, 4318).
+fullnameOverride: tempo
+replicas: 1
+
+tempo:
+  reportingEnabled: false        # sin telemetria de uso hacia Grafana Labs
+  multitenancyEnabled: false     # un solo tenant
+  # Retencion 72 h: la aplica el backend-worker (compaction.block_retention) sobre los bloques en S3.
+  retention: 72h
+
+  # Credenciales por entorno (Secret `s3-credentials`), expandidas gracias a -config.expand-env=true.
+  extraArgs:
+    config.expand-env: "true"
+  extraEnvFrom:
+    - secretRef:
+        name: s3-credentials
+  # readOnlyRootFilesystem: /tmp en emptyDir por si Tempo escribe temporales.
+  extraVolumeMounts:
+    - name: tmp
+      mountPath: /tmp
+
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: tempo-traces
+        endpoint: seaweedfs-s3.storage.svc.cluster.local:8333   # host:puerto, sin esquema
+        region: us-east-1
+        access_key: ${AWS_ACCESS_KEY_ID}          # referencia a variable de entorno, no es un secreto
+        secret_key: ${AWS_SECRET_ACCESS_KEY}      # idem
+        insecure: true                            # HTTP dentro del clúster
+        forcepathstyle: true                      # SeaweedFS exige path-style
+      local: null                                 # el chart trae `local.path` por defecto; con backend s3 sobra
+      wal:
+        path: /var/tempo/wal                      # WAL local (PVC)
+
+  # Receptores OTLP (4317 gRPC, 4318 HTTP) del contrato. Los receptores Jaeger por defecto del chart se dejan:
+  # el template del Service accede siempre a receivers.jaeger.protocols.* y falla si faltan (nadie los usa).
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+  # metrics_generator DESACTIVADO (ahorra RAM/CPU). Para activar span-metrics y service-graphs con
+  # remote_write al Mimir, sustituir por:
+  #   metricsGenerator:
+  #     enabled: true
+  #     storage:
+  #       path: /var/tempo/metrics
+  #       remote_write:
+  #         - url: http://mimir.observability.svc.cluster.local:8080/api/v1/push
+  #           send_exemplars: true
+  #     registry:
+  #       external_labels: {cluster: hub}
+  #   overrides:
+  #     defaults:
+  #       metrics_generator:
+  #         processors: [service-graphs, span-metrics]
+  # (el WAL del generador necesita escribir en /var/tempo, que es el PVC.)
+  metricsGenerator:
+    enabled: false
+
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 800Mi}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+    seccompProfile:
+      type: RuntimeDefault
+
+securityContext:
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  runAsNonRoot: true
+
+persistence:
+  enabled: true        # WAL y bloques locales recientes; las trazas definitivas van a S3
+  size: 5Gi
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "3200"
+  prometheus.io/path: /metrics
+
+extraVolumes:
+  - name: tmp
+    emptyDir: {}

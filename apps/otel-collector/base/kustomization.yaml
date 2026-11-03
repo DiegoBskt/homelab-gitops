@@ -1,0 +1,18 @@
+# Colectores OpenTelemetry (distribucion contrib) en 'observability': agente por nodo + gateway.
+# Decision: DOS releases del chart simple 'opentelemetry-collector' (no opentelemetry-kube-stack + Operator);
+# justificacion y numeros en el informe de la fase 3 y en docs (ver comentarios en values-*.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: opentelemetry-collector
+    repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    version: 0.178.2          # appVersion 0.163.2
+    releaseName: otel-gateway
+    namespace: observability
+    valuesFile: values-gateway.yaml
+  - name: opentelemetry-collector
+    repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    version: 0.178.2
+    releaseName: otel-agent
+    namespace: observability
+    valuesFile: values-agent.yaml

@@ -14,3 +14,7 @@ openbao-keys*
 .DS_Store
 # salidas locales de validacion
 /out/
+# cache de charts que descarga `kustomize build --enable-helm` (se regenera con la version fijada)
+apps/*/base/charts/
+# excepcion: el script (sin secretos) si se versiona
+!bootstrap/scripts/openbao-unseal.sh

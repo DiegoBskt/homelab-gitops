@@ -1,0 +1,14 @@
+# Loki (monolitico) -> observability. Chart en grafana-community, version fijada.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+labels:
+  - pairs: {app.kubernetes.io/part-of: homelab}
+    includeSelectors: false
+helmCharts:
+  - name: loki
+    repo: oci://ghcr.io/grafana-community/helm-charts
+    version: 20.3.0
+    releaseName: loki
+    namespace: observability
+    valuesFile: values.yaml

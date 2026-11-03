@@ -1,0 +1,22 @@
+# Ruta de Hubble UI. El Service hubble-ui (kube-system, :80) lo crea Cilium; aqui solo se publica.
+# El HTTPRoute vive en kube-system, distinto del namespace del Gateway (gateway-system):
+#  - parentRefs cruza de namespace y lo autoriza el Gateway (allowedRoutes.namespaces.from=All).
+#  - backendRefs es del mismo namespace que la ruta -> no hace falta ReferenceGrant.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hubble-ui
+  namespace: kube-system
+  labels: {app.kubernetes.io/part-of: homelab}
+spec:
+  parentRefs:
+    - name: eg
+      namespace: gateway-system
+  hostnames:
+    - hubble.hub.localtest.me
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /}
+      backendRefs:
+        - name: hubble-ui
+          port: 80
