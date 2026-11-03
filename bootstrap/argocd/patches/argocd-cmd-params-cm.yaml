@@ -5,3 +5,6 @@ metadata:
 data:
   # El TLS termina en el Gateway (Envoy); Argo CD sirve HTTP por dentro del clúster.
   server.insecure: "true"
+  # Compara contra el resultado de un dry-run en el servidor: asi los valores por defecto que anaden
+  # los CRDs y los controladores (p. ej. weight/matches en HTTPRoute) no aparecen como OutOfSync.
+  controller.diff.server.side: "true"
