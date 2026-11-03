@@ -13,7 +13,7 @@ spec:
   destination: {server: https://kubernetes.default.svc, namespace: argocd}
   ignoreDifferences:
     # Argo CD rellena este Secret en tiempo de ejecucion (clave del servidor, hash de admin)
-    - {group: "", kind: Secret, name: argocd-secret, jsonPointers: [/data]}
+    - {kind: Secret, name: argocd-secret, jsonPointers: [/data]}
   syncPolicy:
     automated: {prune: true, selfHeal: true}
     syncOptions: [ServerSideApply=true, SkipDryRunOnMissingResource=true, RespectIgnoreDifferences=true]
