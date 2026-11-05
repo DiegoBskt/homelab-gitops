@@ -59,11 +59,6 @@ helmCharts:
           prometheus.io/port: "8080"
           prometheus.io/path: /metrics
 
-      # El gateway es un nginx sin endpoint /metrics (404): no se scrapea.
-      gateway:
-        podAnnotations:
-          prometheus.io/scrape: "false"
-
       mimir:
         structuredConfig:
           # Un solo tenant (contrato, seccion 2).

@@ -236,6 +236,8 @@ config:
             - {source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_k8s_app], regex: "kube-system;cilium", action: drop}
             - {source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_io_cilium_app], regex: "kube-system;operator", action: drop}
             - {source_labels: [__meta_kubernetes_namespace], regex: "envoy-gateway-system|argocd", action: drop}
+            # El gateway de Mimir es un nginx sin /metrics (404): no se scrapea.
+            - {source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_label_app_kubernetes_io_component], regex: "observability;mimir;gateway", action: drop}
             - {source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], regex: "(.+)", target_label: __metrics_path__}
             - {source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port], regex: "([^:]+)(?::\\d+)?;(\\d+)", replacement: "$$1:$$2", target_label: __address__}
             - {source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_app_kubernetes_io_name], regex: "(.+);(.+)", replacement: "$$1/$$2", target_label: job}
