@@ -21,3 +21,6 @@ resources:
   - kube-state-metrics.yaml
   - node-exporter.yaml
   - grafana.yaml
+  # --- fase 4, ola 5: consola web y UI de Hubble ---
+  - headlamp.yaml
+  - hubble-route.yaml
