@@ -12,3 +12,7 @@ resources:
   - platform-secrets.yaml
   # --- fase 4, ola 2: almacenamiento de objetos S3 ---
   - seaweedfs.yaml
+  # --- fase 4, ola 3: metricas, logs y trazas ---
+  - mimir.yaml
+  - loki.yaml
+  - tempo.yaml
