@@ -10,3 +10,5 @@ resources:
   - external-secrets.yaml
   - openbao.yaml
   - platform-secrets.yaml
+  # --- fase 4, ola 2: almacenamiento de objetos S3 ---
+  - seaweedfs.yaml
