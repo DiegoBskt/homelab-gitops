@@ -5,3 +5,8 @@ resources:
   - namespaces.yaml
   - envoy-gateway.yaml
   - argocd.yaml
+  # --- fase 4, ola 0-1: emision de certificados y secretos (OpenBao requiere init/unseal manual) ---
+  - cert-manager.yaml
+  - external-secrets.yaml
+  - openbao.yaml
+  - platform-secrets.yaml
