@@ -16,3 +16,8 @@ resources:
   - mimir.yaml
   - loki.yaml
   - tempo.yaml
+  # --- fase 4, ola 4: recoleccion de telemetria y Grafana ---
+  - otel-collector.yaml
+  - kube-state-metrics.yaml
+  - node-exporter.yaml
+  - grafana.yaml
