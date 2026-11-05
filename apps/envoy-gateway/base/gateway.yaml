@@ -59,3 +59,31 @@ spec:
       port: 80
       allowedRoutes:
         namespaces: {from: All}
+    # HTTPS (contrato seccion 8): certificado comodin emitido por cert-manager (ClusterIssuer local-ca).
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.hub.localtest.me"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - {kind: Secret, name: wildcard-hub-tls}
+      allowedRoutes:
+        namespaces: {from: All}
+---
+# Certificado comodin. Ola 3: despues del Gateway (ola 2) para que un Certificate aun no Ready
+# (cert-manager/local-ca llegan por otras Applications) no bloquee el listener HTTP existente.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-hub
+  namespace: gateway-system
+  labels: {app.kubernetes.io/part-of: homelab}
+  annotations: {argocd.argoproj.io/sync-wave: "3"}
+spec:
+  secretName: wildcard-hub-tls
+  dnsNames: ["*.hub.localtest.me", hub.localtest.me]
+  duration: 2160h
+  renewBefore: 720h
+  privateKey: {algorithm: ECDSA, size: 256}
+  issuerRef: {name: local-ca, kind: ClusterIssuer, group: cert-manager.io}

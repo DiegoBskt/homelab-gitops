@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
 export PATH="$HOME/.local/bin:$PATH"
 OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
 fail=0; warn=0
-REQUIRE_TLS="${REQUIRE_TLS:-0}"   # 1 = exige listener https + Certificate (fase 4)
+REQUIRE_TLS="${REQUIRE_TLS:-1}"   # 1 (por defecto desde la fase 4) = exige listener https + Certificate
 ok()   { printf 'OK     %s\n' "$*"; }
 ko()   { printf 'FALLO  %s\n' "$*"; fail=1; }
 tls_ko(){ if [ "$REQUIRE_TLS" = 1 ]; then ko "$*"; else aviso "pendiente (fase 4, REQUIRE_TLS=0): $*"; fi; }
