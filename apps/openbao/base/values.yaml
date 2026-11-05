@@ -34,6 +34,14 @@ server:
     prometheus.io/port: "8200"
     prometheus.io/path: /v1/sys/metrics
   extraLabels: {}
+  # El script de arranque del chart copia la configuracion a /tmp: con rootfs de solo lectura hace falta un emptyDir ahi
+  # (sin el, el pod entra en CrashLoopBackOff con "cp: can't create '/tmp/storageconfig.hcl': Read-only file system").
+  volumes:
+    - name: tmp
+      emptyDir: {}
+  volumeMounts:
+    - name: tmp
+      mountPath: /tmp
   statefulSet:
     securityContext:
       pod:
