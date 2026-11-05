@@ -1,3 +1,5 @@
+# OJO con las olas: el Certificate va ANTES que el Gateway (ola 1 < 2). Argo CD evalua la salud del Gateway y un listener https sin
+# Secret lo marca como fallido; si el Certificate estuviera en una ola posterior se produciria un interbloqueo.
 # En kind no hay LoadBalancer: el proxy de Envoy se fija al control-plane (ingress-ready=true) y
 # publica el 80/443 del host con hostPort (Cilium con hostPort.enabled=true).
 # El listener del Gateway en el puerto N escucha en el contenedor en N+10000 (80 -> 10080, 443 -> 10443).
@@ -79,7 +81,7 @@ metadata:
   name: wildcard-hub
   namespace: gateway-system
   labels: {app.kubernetes.io/part-of: homelab}
-  annotations: {argocd.argoproj.io/sync-wave: "3"}
+  annotations: {argocd.argoproj.io/sync-wave: "1"}
 spec:
   secretName: wildcard-hub-tls
   dnsNames: ["*.hub.localtest.me", hub.localtest.me]
